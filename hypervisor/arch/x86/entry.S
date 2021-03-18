@@ -17,9 +17,9 @@
 	.text
 	.globl arch_entry
 arch_entry:
-	cli
+	cli					/* 禁用中断 */
 
-	push %rbp
+	push %rbp			/* 保存内核栈callee saved寄存器 */
 	push %rbx
 	push %r12
 	push %r13
@@ -33,10 +33,10 @@ arch_entry:
 	add %rax,%rsi
 
 	/* Save the Linux stack pointer inside the per_cpu region */
-	mov %rsp,PERCPU_LINUX_SP(%rsi)
+	mov %rsp,PERCPU_LINUX_SP(%rsi)			/* 保存内核栈指针 */
 
 	/* Set the Jailhouse stack pointer */
-	lea PERCPU_STACK_END-8(%rsi),%rsp
+	lea PERCPU_STACK_END-8(%rsi),%rsp		/* 采用PER CPU栈指针代替内核栈指针，即切换到hypervisor栈 */
 
 	push %rsi
 
@@ -44,13 +44,13 @@ arch_entry:
 	 * Call the architecture-independent entry(cpuid, struct per_cpu*)
 	 * function.
 	 */
-	call entry
+	call entry								/* 调用int entry(unsigned int cpu_id, struct per_cpu *cpu_data)函数 */
 
 	pop %rsi
 
-	mov PERCPU_LINUX_SP(%rsi),%rsp
+	mov PERCPU_LINUX_SP(%rsi),%rsp			/* 切换回内核栈 */
 
-	pop %r15
+	pop %r15			/* 恢复callee saved寄存器 */
 	pop %r14
 	pop %r13
 	pop %r12

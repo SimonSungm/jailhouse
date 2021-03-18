@@ -624,19 +624,19 @@ int paging_init(void)
 	unsigned long vaddr, flags;
 	int err;
 
-	per_cpu_pages = hypervisor_header.max_cpus *
+	per_cpu_pages = hypervisor_header.max_cpus *				/* 存放PER CPU区域的页的个数 */
 		sizeof(struct per_cpu) / PAGE_SIZE;
 
-	config_pages = PAGES(jailhouse_system_config_size(system_config));
+	config_pages = PAGES(jailhouse_system_config_size(system_config));		/* 存放config区域的页的个数 */
 
-	page_offset = JAILHOUSE_BASE -
+	page_offset = JAILHOUSE_BASE -								/* 虚拟地址与真实物理地址之间的差值 */
 		system_config->hypervisor_memory.phys_start;
 
-	mem_pool.pages = (system_config->hypervisor_memory.size -
+	mem_pool.pages = (system_config->hypervisor_memory.size -			/* memory pool除hypervisor本身以外剩余空闲页个数 */
 		(__page_pool - (u8 *)&hypervisor_header)) / PAGE_SIZE;
-	bitmap_pages = (mem_pool.pages + BITS_PER_PAGE - 1) / BITS_PER_PAGE;
+	bitmap_pages = (mem_pool.pages + BITS_PER_PAGE - 1) / BITS_PER_PAGE;	/* 计算管理空闲页所需的bitmap所占的页数 */
 
-	if (mem_pool.pages <= per_cpu_pages + config_pages + bitmap_pages)
+	if (mem_pool.pages <= per_cpu_pages + config_pages + bitmap_pages)		/* 计算空闲页是否足够存放PER CPU、config以及bitmap */
 		return -ENOMEM;
 
 	mem_pool.base_address = __page_pool;
@@ -647,6 +647,22 @@ int paging_init(void)
 	for (n = 0; n < mem_pool.used_pages; n++)
 		set_bit(n, mem_pool.used_bitmap);
 	mem_pool.flags = PAGE_SCRUB_ON_FREE;
+
+	/* 	   Memory layout
+	 *  --------------------
+	 * | Hypervisor Header  |
+     *  --------------------
+     * |  Hyperviosr core   |
+	 *  --------------------
+	 * |   PER CPU area     |
+	 *  --------------------
+	 * |    config area     |
+	 *  --------------------
+	 * |  mem_pool bit map  |
+	 *  --------------------
+	 * |     free memory    |
+	 *  --------------------
+	 */
 
 	remap_pool.used_bitmap = page_alloc(&mem_pool, NUM_REMAP_BITMAP_PAGES);
 

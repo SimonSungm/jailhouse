@@ -244,12 +244,12 @@ static void enter_hypervisor(void *info)
 	int (*entry)(unsigned int);
 	int err;
 
-	entry = header->entry + (unsigned long) hypervisor_mem;
+	entry = header->entry + (unsigned long) hypervisor_mem;			/* 计算hypervisor入口虚拟地址,实际为架构的entry.S中的arch_entry的地址 */
 
 	if (cpu < header->max_cpus)
 		/* either returns 0 or the same error code across all CPUs */
-		err = entry(cpu);
-	else
+		err = entry(cpu);											/* 离开kernel module，进入到hypervisor入口 */
+	else															/* entry函数执行完毕，Linux此时变成了Guest OS，运行在non-root模式下 */
 		err = -EINVAL;
 
 	if (err)
@@ -257,7 +257,7 @@ static void enter_hypervisor(void *info)
 
 #if defined(CONFIG_X86) && LINUX_VERSION_CODE >= KERNEL_VERSION(4,0,0)
 	/* on Intel, VMXE is now on - update the shadow */
-	if (boot_cpu_has(X86_FEATURE_VMX) && !err) {
+	if (boot_cpu_has(X86_FEATURE_VMX) && !err) {						/* Linux此时已经变成了Guest，更新CR4的VMXE shadow，VMX实际已经在hypervisor中启用 */
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5,5,0)
 		cr4_set_bits_irqsoff(X86_CR4_VMXE);
 #else
@@ -266,7 +266,7 @@ static void enter_hypervisor(void *info)
 	}
 #endif
 
-	atomic_inc(&call_done);
+	atomic_inc(&call_done);				/* 当前CPU初始化完成后将call_done计数加一 */
 }
 
 static inline const char * jailhouse_get_fw_name(void)
@@ -378,28 +378,28 @@ static int jailhouse_cmd_enable(struct jailhouse_system __user *arg)
 	long max_cpus;
 	int err;
 
-	fw_name = jailhouse_get_fw_name();
+	fw_name = jailhouse_get_fw_name();							/* 检查x86是否拥有vmx特性，对于ARM无操作，并返回JAILHOUSE_FW_NAME */
 	if (!fw_name) {
 		pr_err("jailhouse: Missing or unsupported HVM technology\n");
 		return -ENODEV;
 	}
 
-	if (copy_from_user(&config_header, arg, sizeof(config_header)))
+	if (copy_from_user(&config_header, arg, sizeof(config_header)))		/* 将config的header读入，可以在工程的configs目录下找到jailhouse提供的config demo */
 		return -EFAULT;
 
-	if (memcmp(config_header.signature, JAILHOUSE_SYSTEM_SIGNATURE,
+	if (memcmp(config_header.signature, JAILHOUSE_SYSTEM_SIGNATURE,		/* 比较config的签名是否正确 */
 		   sizeof(config_header.signature)) != 0) {
 		pr_err("jailhouse: Not a system configuration\n");
 		return -EINVAL;
 	}
-	if (config_header.revision != JAILHOUSE_CONFIG_REVISION) {
+	if (config_header.revision != JAILHOUSE_CONFIG_REVISION) {			/* 比较config和内核模块的版本是否一致 */
 		pr_err("jailhouse: Configuration revision mismatch\n");
 		return -EINVAL;
 	}
 
 	config_header.root_cell.name[JAILHOUSE_CELL_NAME_MAXLEN] = 0;
 
-	max_cpus = get_max_cpus(config_header.root_cell.cpu_set_size, arg);
+	max_cpus = get_max_cpus(config_header.root_cell.cpu_set_size, arg);		/* 获取linux包含的最大的CPU数量 */
 	if (max_cpus < 0)
 		return max_cpus;
 	if (max_cpus > UINT_MAX)
@@ -409,12 +409,12 @@ static int jailhouse_cmd_enable(struct jailhouse_system __user *arg)
 		return -EINTR;
 
 	err = -EBUSY;
-	if (jailhouse_enabled || !try_module_get(THIS_MODULE))
+	if (jailhouse_enabled || !try_module_get(THIS_MODULE))			/* 检查是否已经启用了jailhouse以及模块是否被正确加载 */
 		goto error_unlock;
 
 #ifdef CONFIG_ARM
 	/* open-coded is_hyp_mode_available to use __boot_cpu_mode_sym */
-	if ((*__boot_cpu_mode_sym & MODE_MASK) != HYP_MODE ||
+	if ((*__boot_cpu_mode_sym & MODE_MASK) != HYP_MODE ||			/* 对于ARM，检查系统是否支持HYP mode */
 	    (*__boot_cpu_mode_sym) & BOOT_CPU_MODE_MISMATCH) {
 		pr_err("jailhouse: HYP mode not available\n");
 		err = -ENODEV;
@@ -422,11 +422,11 @@ static int jailhouse_cmd_enable(struct jailhouse_system __user *arg)
 	}
 #endif
 #ifdef CONFIG_X86
-	if (boot_cpu_has(X86_FEATURE_VMX)) {
+	if (boot_cpu_has(X86_FEATURE_VMX)) {						/* 对于x86，检查系统是否支持vmx */
 		u64 features;
 
 		rdmsrl(MSR_IA32_FEAT_CTL, features);
-		if ((features & FEAT_CTL_VMX_ENABLED_OUTSIDE_SMX) == 0) {
+		if ((features & FEAT_CTL_VMX_ENABLED_OUTSIDE_SMX) == 0) {		/* 检查vmx是否被BIOS禁用 */
 			pr_err("jailhouse: VT-x disabled by Firmware/BIOS\n");
 			err = -ENODEV;
 			goto error_put_module;
@@ -435,24 +435,24 @@ static int jailhouse_cmd_enable(struct jailhouse_system __user *arg)
 #endif
 
 	/* Load hypervisor image */
-	err = request_firmware(&hypervisor, fw_name, jailhouse_dev);
+	err = request_firmware(&hypervisor, fw_name, jailhouse_dev);		/* 加载hypervisor */
 	if (err) {
 		pr_err("jailhouse: Missing hypervisor image %s\n", fw_name);
 		goto error_put_module;
 	}
 
-	header = (struct jailhouse_header *)hypervisor->data;
+	header = (struct jailhouse_header *)hypervisor->data;			
 
 	err = -EINVAL;
-	if (memcmp(header->signature, JAILHOUSE_SIGNATURE,
+	if (memcmp(header->signature, JAILHOUSE_SIGNATURE,			/* 比较hypervisor的签名是否正确 */
 		   sizeof(header->signature)) != 0 ||
 	    hypervisor->size >= hv_mem->size)
 		goto error_release_fw;
 
-	hv_core_and_percpu_size = header->core_size +
-		max_cpus * header->percpu_size;
-	config_size = jailhouse_system_config_size(&config_header);
-	if (hv_core_and_percpu_size >= hv_mem->size ||
+	hv_core_and_percpu_size = header->core_size +					/* 计算hypervisor core和percpu区域的大小	*/
+		max_cpus * header->percpu_size;								/* core包含了hypervisor的代码段和数据段   	*/
+	config_size = jailhouse_system_config_size(&config_header);		/* percpu区域将用于存放hypervisor的栈等		*/
+	if (hv_core_and_percpu_size >= hv_mem->size ||					/* hypervisor的memory layout可以在Documentation/memory-layout.txt中找到 */
 	    config_size >= hv_mem->size - hv_core_and_percpu_size)
 		goto error_release_fw;
 
@@ -461,9 +461,9 @@ static int jailhouse_cmd_enable(struct jailhouse_system __user *arg)
 #endif
 	/* Unmap hypervisor_mem from a previous "enable". The mapping has to be
 	 * redone since the root-cell config might have changed. */
-	jailhouse_firmware_free();
+	jailhouse_firmware_free();							
 
-	hypervisor_mem_res = request_mem_region(hv_mem->phys_start,
+	hypervisor_mem_res = request_mem_region(hv_mem->phys_start,		/* 为hypervisor分配物理内存，该区域是预先留存给hypervisor的，通过kernel cmdline的memmap参数设置 */
 						hv_mem->size,
 						"Jailhouse hypervisor");
 	if (!hypervisor_mem_res) {
@@ -475,7 +475,7 @@ static int jailhouse_cmd_enable(struct jailhouse_system __user *arg)
 	}
 
 	/* Map physical memory region reserved for Jailhouse. */
-	hypervisor_mem = jailhouse_ioremap(hv_mem->phys_start, remap_addr,
+	hypervisor_mem = jailhouse_ioremap(hv_mem->phys_start, remap_addr,		/* 给hypervisor的物理内存做虚拟内存映射 */
 					   hv_mem->size);
 	if (!hypervisor_mem) {
 		pr_err("jailhouse: Unable to map RAM reserved for hypervisor "
@@ -483,21 +483,21 @@ static int jailhouse_cmd_enable(struct jailhouse_system __user *arg)
 		goto error_release_memreg;
 	}
 
-	console_page = (struct jailhouse_virt_console*)
+	console_page = (struct jailhouse_virt_console*)					/* 计算console的虚拟地址 */
 		(hypervisor_mem + header->console_page);
 	last_console.valid = false;
 
 	/* Copy hypervisor's binary image at beginning of the memory region
 	 * and clear the rest to zero. */
-	memcpy(hypervisor_mem, hypervisor->data, hypervisor->size);
-	memset(hypervisor_mem + hypervisor->size, 0,
+	memcpy(hypervisor_mem, hypervisor->data, hypervisor->size);		/* 将hypervisor整个加载到预留的物理内存上 */
+	memset(hypervisor_mem + hypervisor->size, 0,					/* 将预留内存的其余区域初始化为0 */
 	       hv_mem->size - hypervisor->size);
 
 	header = (struct jailhouse_header *)hypervisor_mem;
 	header->max_cpus = max_cpus;
 
 #if defined(CONFIG_ARM) || defined(CONFIG_ARM64)
-	header->arm_linux_hyp_vectors = virt_to_phys(*__hyp_stub_vectors_sym);
+	header->arm_linux_hyp_vectors = virt_to_phys(*__hyp_stub_vectors_sym);		/* arm的HYP mode的异常处理向量地址，将在启用hypervisor时使用 */
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4,12,0)
 	header->arm_linux_hyp_abi = HYP_STUB_ABI_LEGACY;
 #else
@@ -505,7 +505,7 @@ static int jailhouse_cmd_enable(struct jailhouse_system __user *arg)
 #endif
 #endif
 
-	err = jailhouse_sysfs_core_init(jailhouse_dev, header->core_size);
+	err = jailhouse_sysfs_core_init(jailhouse_dev, header->core_size);			/* 创建hypervisor的binary文件，位于/sys/devices/jailhouse/core */ 
 	if (err)
 		goto error_unmap;
 
@@ -527,6 +527,7 @@ static int jailhouse_cmd_enable(struct jailhouse_system __user *arg)
 		goto error_unmap;
 	}
 
+	/* 主要是设置debug console的clock gate，与硬件特性相关，与hypervisor本身的功能无关 */
 	if (config->debug_console.clock_reg) {
 		clock_reg = ioremap(config->debug_console.clock_reg,
 				    sizeof(clock_gates));
@@ -575,8 +576,8 @@ static int jailhouse_cmd_enable(struct jailhouse_system __user *arg)
 			*lapic_timer_period_sym / (1000 / HZ);
 #endif
 
-	err = jailhouse_cell_prepare_root(&config->root_cell);
-	if (err)
+	err = jailhouse_cell_prepare_root(&config->root_cell);		/* 创建root cell，主要是初始化root cell的cell描述符, */ 
+	if (err)													/* 分配数据结构空间，还有注册PCI设备和创建sysfs */
 		goto error_unmap;
 
 	error_code = 0;
@@ -591,10 +592,10 @@ static int jailhouse_cmd_enable(struct jailhouse_system __user *arg)
 	 * CPU back.
 	 */
 	atomic_set(&call_done, 0);
-	on_each_cpu(enter_hypervisor, header, 0);
-	while (atomic_read(&call_done) != num_online_cpus())
-		cpu_relax();
-
+	on_each_cpu(enter_hypervisor, header, 0);					/* 进入hypervisor,计算hypervisor入口, */
+	while (atomic_read(&call_done) != num_online_cpus())		/* 并跳转到架构的entry.S文件的arch_entry处 */
+		cpu_relax();											/* 每个CPU都会将call_done计数加一，只有当call_done等于online的CPU数量时, */
+																/* 初始化才算完成。否则当前CPU必须等待其他CPU完成 */
 	preempt_enable();
 
 	if (error_code) {
@@ -607,8 +608,8 @@ static int jailhouse_cmd_enable(struct jailhouse_system __user *arg)
 
 	release_firmware(hypervisor);
 
-	jailhouse_cell_register_root();
-	jailhouse_pci_virtual_root_devices_add(&config_header);
+	jailhouse_cell_register_root();								/* 将root cell添加到cell的链表上，并注册相应的sysfs */
+	jailhouse_pci_virtual_root_devices_add(&config_header);		/* 向host上添加虚拟PCI设备 */
 
 	jailhouse_enabled = true;
 
@@ -941,25 +942,25 @@ static int __init jailhouse_init(void)
 	RESOLVE_EXTERNAL_SYMBOL(__hyp_stub_vectors);
 #endif
 
-	jailhouse_dev = root_device_register("jailhouse");
+	jailhouse_dev = root_device_register("jailhouse");		/* 注册root device，创建/sys/devices/jailhouse目录 */
 	if (IS_ERR(jailhouse_dev))
 		return PTR_ERR(jailhouse_dev);
 
-	err = jailhouse_sysfs_init(jailhouse_dev);
+	err = jailhouse_sysfs_init(jailhouse_dev);				/* 创建/sys/devices/jailhouse/cells目录 */
 	if (err)
 		goto unreg_dev;
 
-	err = misc_register(&jailhouse_misc_dev);
+	err = misc_register(&jailhouse_misc_dev);				/* 创建misc设备，主要用于提供用户态与hypervisor的交互的接口 */
 	if (err)
 		goto exit_sysfs;
 
-	err = jailhouse_pci_register();
+	err = jailhouse_pci_register();							/* 创建一个伪PCI设备，用于将设备分配给非root cell使用 */
 	if (err)
 		goto exit_misc;
 
-	register_reboot_notifier(&jailhouse_shutdown_nb);
+	register_reboot_notifier(&jailhouse_shutdown_nb);		/* 注册重启的notifier */
 
-	init_hypercall();
+	init_hypercall();										/* 对于x86仅判断CPU是否支持VMX，对于ARM无操作 */
 
 	return 0;
 exit_misc:

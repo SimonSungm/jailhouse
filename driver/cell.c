@@ -58,13 +58,13 @@ static struct cell *cell_create(const struct jailhouse_cell_desc *cell_desc)
 	/* determine cell id */
 	id = 0;
 retry:
-	list_for_each_entry(cell, &cells, entry)
+	list_for_each_entry(cell, &cells, entry)		/* 通过遍历cell链表找到最小的没用被使用的id */
 		if (cell->id == id) {
 			id++;
 			goto retry;
 		}
 
-	cell = kzalloc(sizeof(*cell), GFP_KERNEL);
+	cell = kzalloc(sizeof(*cell), GFP_KERNEL);		/* 为cell描述符申请空间 */
 	if (!cell)
 		return ERR_PTR(-ENOMEM);
 
@@ -72,33 +72,33 @@ retry:
 
 	cell->id = id;
 
-	bitmap_copy(cpumask_bits(&cell->cpus_assigned),
+	bitmap_copy(cpumask_bits(&cell->cpus_assigned),		/* 设置CPU使用情况的的bitmap，拷贝到cell描述符中 */
 		    jailhouse_cell_cpu_set(cell_desc),
 		    min((unsigned int)nr_cpumask_bits,
 		        cell_desc->cpu_set_size * 8));
 
-	cell->num_memory_regions = cell_desc->num_memory_regions;
-	cell->memory_regions = vmalloc(sizeof(struct jailhouse_memory) *
+	cell->num_memory_regions = cell_desc->num_memory_regions;			/* 设置cell的memory region个数 */
+	cell->memory_regions = vmalloc(sizeof(struct jailhouse_memory) *	/* 为memory region数据结构申请内存 */
 				       cell->num_memory_regions);
 	if (!cell->memory_regions) {
 		kfree(cell);
 		return ERR_PTR(-ENOMEM);
 	}
 
-	memcpy(cell->name, cell_desc->name, JAILHOUSE_CELL_ID_NAMELEN);
+	memcpy(cell->name, cell_desc->name, JAILHOUSE_CELL_ID_NAMELEN);		/* 设置cell的名称 */
 	cell->name[JAILHOUSE_CELL_ID_NAMELEN] = 0;
 
-	memcpy(cell->memory_regions, jailhouse_cell_mem_regions(cell_desc),
+	memcpy(cell->memory_regions, jailhouse_cell_mem_regions(cell_desc),		/* 将配置中的memory region描述符拷贝到cell描述符中 */
 	       sizeof(struct jailhouse_memory) * cell->num_memory_regions);
 
-	err = jailhouse_pci_cell_setup(cell, cell_desc);
+	err = jailhouse_pci_cell_setup(cell, cell_desc);			/* 为cell设置PCI设备 */
 	if (err) {
 		vfree(cell->memory_regions);
 		kfree(cell);
 		return ERR_PTR(err);
 	}
 
-	err = jailhouse_sysfs_cell_create(cell);
+	err = jailhouse_sysfs_cell_create(cell);					/* 为cell创建sysfs */
 	if (err)
 		/* cleanup done by jailhouse_sysfs_cell_create */
 		return ERR_PTR(err);

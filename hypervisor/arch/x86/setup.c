@@ -119,86 +119,86 @@ int arch_cpu_init(struct per_cpu *cpu_data)
 	int err, n;
 
 	/* read GDTR */
-	read_gdtr(&cpu_data->linux_gdtr);
+	read_gdtr(&cpu_data->linux_gdtr);				/* 保存Linux的GDTR */
 
 	/* read TR and TSS descriptor */
 	asm volatile("str %0" : "=m" (cpu_data->linux_tss.selector));
-	read_descriptor(cpu_data, &cpu_data->linux_tss);
+	read_descriptor(cpu_data, &cpu_data->linux_tss);		/* 保存Linux的TSS */
 
 	if (cpu_data->linux_tss.selector / 8 >= NUM_GDT_DESC)
 		return trace_error(-EINVAL);
 
 	/* save CS as long as we have access to the Linux page table */
-	asm volatile("mov %%cs,%0" : "=m" (cpu_data->linux_cs.selector));
-	read_descriptor(cpu_data, &cpu_data->linux_cs);
+	asm volatile("mov %%cs,%0" : "=m" (cpu_data->linux_cs.selector));	
+	read_descriptor(cpu_data, &cpu_data->linux_cs);				/* 保存Linux的CS */
 
 	/* save segment registers - they may point to 32 or 16 bit segments */
 	asm volatile("mov %%ds,%0" : "=m" (cpu_data->linux_ds.selector));
-	read_descriptor(cpu_data, &cpu_data->linux_ds);
+	read_descriptor(cpu_data, &cpu_data->linux_ds);		/* 保存Linux的DS */
 
 	asm volatile("mov %%es,%0" : "=m" (cpu_data->linux_es.selector));
-	read_descriptor(cpu_data, &cpu_data->linux_es);
+	read_descriptor(cpu_data, &cpu_data->linux_es);		/* 保存Linux的ES */
 
 	asm volatile("mov %%fs,%0" : "=m" (cpu_data->linux_fs.selector));
-	read_descriptor(cpu_data, &cpu_data->linux_fs);
-	cpu_data->linux_fs.base = read_msr(MSR_FS_BASE);
+	read_descriptor(cpu_data, &cpu_data->linux_fs);			/* 保存Linux的FS */
+	cpu_data->linux_fs.base = read_msr(MSR_FS_BASE);		/* 保存Linux的MSR_FS_BASE */
 
 	asm volatile("mov %%gs,%0" : "=m" (cpu_data->linux_gs.selector));
-	read_descriptor(cpu_data, &cpu_data->linux_gs);
-	cpu_data->linux_gs.base = read_msr(MSR_GS_BASE);
+	read_descriptor(cpu_data, &cpu_data->linux_gs);			/* 保存Linux的GS */
+	cpu_data->linux_gs.base = read_msr(MSR_GS_BASE);		/* 保存Linux的MSR_GS_BASE */
 
 	/* read registers to restore on first VM-entry */
-	for (n = 0; n < NUM_ENTRY_REGS; n++)
+	for (n = 0; n < NUM_ENTRY_REGS; n++)					/* 读取arch_entry保存在Linux栈中的上下文，以便进入VM后可以恢复到进入hypervisor的函数 */
 		cpu_data->linux_reg[n] =
 			((unsigned long *)cpu_data->linux_sp)[n];
 	cpu_data->linux_ip =
 		((unsigned long *)cpu_data->linux_sp)[NUM_ENTRY_REGS];
 
 	/* set GDTR */
-	dtr.limit = NUM_GDT_DESC * 8 - 1;
+	dtr.limit = NUM_GDT_DESC * 8 - 1;			/* 设置GDTR */			
 	dtr.base = (u64)&gdt;
-	write_gdtr(&dtr);
+	write_gdtr(&dtr);						
 
-	set_cs(GDT_DESC_CODE * 8);
+	set_cs(GDT_DESC_CODE * 8);					/* 设置CS */
 
 	/* swap IDTR */
-	read_idtr(&cpu_data->linux_idtr);
+	read_idtr(&cpu_data->linux_idtr);			/* 保存Linux的IDTR，并切换到Hypervisor的IDTR */
 	dtr.limit = NUM_IDT_DESC * 16 - 1;
 	dtr.base = (u64)&idt;
 	write_idtr(&dtr);
 
 	/* paranoid clearing of segment registers */
-	asm volatile(
+	asm volatile(								/* 清理es，ds，ss，将其置零 */
 		"mov %0,%%es\n\t"
 		"mov %0,%%ds\n\t"
 		"mov %0,%%ss"
 		: : "r" (0));
 
 	/* clear TSS busy flag set by previous loading, then set TR */
-	gdt[GDT_DESC_TSS] &= ~DESC_TSS_BUSY;
+	gdt[GDT_DESC_TSS] &= ~DESC_TSS_BUSY;			/* 设置TSS */
 	asm volatile("ltr %%ax" : : "a" (GDT_DESC_TSS * 8));
 
-	cpu_data->linux_cr0 = read_cr0();
-	cpu_data->linux_cr4 = read_cr4();
+	cpu_data->linux_cr0 = read_cr0();				/* 保存Linux的CR0 */
+	cpu_data->linux_cr4 = read_cr4();				/* 保存Linux的CR4 */
 
 	/* swap CR3 */
-	cpu_data->linux_cr3 = read_cr3();
-	write_cr3(paging_hvirt2phys(cpu_data->pg_structs.root_table));
+	cpu_data->linux_cr3 = read_cr3();				/* 保存Linux的CR3 */
+	write_cr3(paging_hvirt2phys(cpu_data->pg_structs.root_table));		/* 切换到Hypervisor的page table */
 
-	cpu_data->pat = read_msr(MSR_IA32_PAT);
-	write_msr(MSR_IA32_PAT, PAT_HOST_VALUE);
+	cpu_data->pat = read_msr(MSR_IA32_PAT);			/* 保存Linux的MSR_IA32_PAT */
+	write_msr(MSR_IA32_PAT, PAT_HOST_VALUE);		/* 切换到Hypervisor的IA32_PAT */
 
-	cpu_data->mtrr_def_type = read_msr(MSR_IA32_MTRR_DEF_TYPE);
+	cpu_data->mtrr_def_type = read_msr(MSR_IA32_MTRR_DEF_TYPE);			/* 保存Linux的IA32_MTRR_DEF_TYPE*/
 
-	cpu_data->linux_efer = read_msr(MSR_EFER);
+	cpu_data->linux_efer = read_msr(MSR_EFER);			/* 保存Linux的EFER */
 
-	cpu_data->initialized = true;
+	cpu_data->initialized = true;					
 
-	err = apic_cpu_init(cpu_data);
+	err = apic_cpu_init(cpu_data);					/* 中断设置相关 */
 	if (err)
 		return err;
 
-	return vcpu_init(cpu_data);
+	return vcpu_init(cpu_data);						/* VMX相关，主要是设置VMCS和相关寄存器，并进入VMXON模式，初始化VMCS */
 }
 
 void __attribute__((noreturn)) arch_cpu_activate_vmm(void)
