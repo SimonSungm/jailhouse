@@ -239,28 +239,29 @@ static int split_hugepage(bool hv_paging, const struct paging *paging,
 			  pt_entry_t pte, unsigned long virt,
 			  unsigned long paging_flags)
 {
-	unsigned long phys = paging->get_phys(pte, virt);
+	unsigned long phys = paging->get_phys(pte, virt);			
 	struct paging_structures sub_structs;
 	unsigned long page_mask, flags;
 
-	if (phys == INVALID_PHYS_ADDR)
+	if (phys == INVALID_PHYS_ADDR)			/* 该PTE没有映射一个block则返回 */
 		return 0;
 
 	page_mask = ~((unsigned long)paging->page_size - 1);
-	phys &= page_mask;
-	virt &= page_mask;
+	phys &= page_mask;				/* 以当前level页的大小对齐物理地址 */
+	virt &= page_mask;				/* 以当前level页的大小对齐虚拟地址 */
 
-	flags = paging->get_flags(pte);
+	flags = paging->get_flags(pte);		/* 获取flag */
 
-	sub_structs.hv_paging = hv_paging;
-	sub_structs.root_paging = paging + 1;
-	sub_structs.root_table = page_alloc(&mem_pool, 1);
+	/* BUG: 如果是最后一级的页表映射则paging+1会出错 */
+	sub_structs.hv_paging = hv_paging;		
+	sub_structs.root_paging = paging + 1;		/* 取更低一级的paging模式 */
+	sub_structs.root_table = page_alloc(&mem_pool, 1);		/* 分配存储更低一级页表的页 */
 	if (!sub_structs.root_table)
 		return -ENOMEM;
-	paging->set_next_pt(pte, paging_hvirt2phys(sub_structs.root_table));
-	flush_pt_entry(pte, paging_flags);
+	paging->set_next_pt(pte, paging_hvirt2phys(sub_structs.root_table));	/* 将当前level的pte指向刚刚分配的下一级的页表 */
+	flush_pt_entry(pte, paging_flags);						/* 清理cache */
 
-	return paging_create(&sub_structs, phys, paging->page_size, virt,
+	return paging_create(&sub_structs, phys, paging->page_size, virt,		/* 映射下一级页表的所有entry */
 			     flags, paging_flags);
 }
 
@@ -286,9 +287,9 @@ int paging_create(const struct paging_structures *pg_structs,
 		  unsigned long phys, unsigned long size, unsigned long virt,
 		  unsigned long access_flags, unsigned long paging_flags)
 {
-	phys &= PAGE_MASK;
-	virt &= PAGE_MASK;
-	size = PAGE_ALIGN(size);
+	phys &= PAGE_MASK;					/* 令物理地址4K对齐 */
+	virt &= PAGE_MASK;					/* 令虚拟地址4K对齐 */
+	size = PAGE_ALIGN(size);			/* 将映射的大小按4K向上取整 */
 
 	while (size > 0) {
 		const struct paging *paging = pg_structs->root_paging;
@@ -298,11 +299,11 @@ int paging_create(const struct paging_structures *pg_structs,
 		int err;
 
 		while (1) {
-			pte = paging->get_entry(pt, virt);
-			if (paging->page_size > 0 &&
-			    paging->page_size <= size &&
-			    ((phys | virt) & (paging->page_size - 1)) == 0 &&
-			    (paging_flags & PAGING_HUGE ||
+			pte = paging->get_entry(pt, virt);			/* 找到虚拟地址virt对应的当前level的entry */
+			if (paging->page_size > 0 &&				/* 当前level允许block mapping */
+			    paging->page_size <= size &&			/* 且当前level一个block的大小小于等于需要mapping的大小 */
+			    ((phys | virt) & (paging->page_size - 1)) == 0 &&	/* 且虚拟地址和物理地址都是以block大小对其的 */
+			    (paging_flags & PAGING_HUGE ||				/* 并且 (允许大页映射或当前level的页已经是最小的了) */
 			     paging->page_size == PAGE_SIZE)) {
 				/*
 				 * We might be overwriting a more fine-grained
@@ -310,29 +311,29 @@ int paging_create(const struct paging_structures *pg_structs,
 				 * fail as we are working along hugepage
 				 * boundaries.
 				 */
-				if (paging->page_size > PAGE_SIZE) {
-					sub_structs.root_paging = paging;
+				if (paging->page_size > PAGE_SIZE) {		/* 如果当前的block是大页，可能我们正在覆盖之前更细粒度的映射，因此首先释放该block */
+					sub_structs.root_paging = paging;		/* 子结构体的paging模式，这里相当于把当前level的paging作为root paging */
 					sub_structs.root_table = pt;
 					sub_structs.hv_paging =
 						pg_structs->hv_paging;
-					paging_destroy(&sub_structs, virt,
+					paging_destroy(&sub_structs, virt,		/* 取消当前的页表项的映射以及后续页表的映射 */
 						       paging->page_size,
 						       paging_flags);
 				}
-				paging->set_terminal(pte, phys, access_flags);
-				flush_pt_entry(pte, paging_flags);
-				break;
+				paging->set_terminal(pte, phys, access_flags);		/* 当前页表项为leaf页表项 */
+				flush_pt_entry(pte, paging_flags);			/* 清理cache */
+				break;										/* 退出，并更新下一段需要映射的空间 */
 			}
-			if (paging->entry_valid(pte, PAGE_PRESENT_FLAGS)) {
-				err = split_hugepage(pg_structs->hv_paging,
+			if (paging->entry_valid(pte, PAGE_PRESENT_FLAGS)) {		/* 如果当前level的页表项映射大小大于需要mapping的大小或不是地址对齐的（意味着这是大页映射），这表明我们需要为该level对应的block的子block做映射 */
+				err = split_hugepage(pg_structs->hv_paging,			/* 将当前映射切分为更细粒度的映射 */
 						     paging, pte, virt,
 						     paging_flags);
 				if (err)
 					return err;
-				pt = paging_phys2hvirt(
+				pt = paging_phys2hvirt(								/* 获取下一级页表 */
 						paging->get_next_pt(pte));
 			} else {
-				pt = page_alloc(&mem_pool, 1);
+				pt = page_alloc(&mem_pool, 1);					/* 如果当前的entry无效，则为其分配下一级的页表 */
 				if (!pt)
 					return -ENOMEM;
 				paging->set_next_pt(pte,
@@ -341,8 +342,8 @@ int paging_create(const struct paging_structures *pg_structs,
 			}
 			paging++;
 		}
-		if (pg_structs->hv_paging)
-			arch_paging_flush_page_tlbs(virt);
+		if (pg_structs->hv_paging)					
+			arch_paging_flush_page_tlbs(virt);		/* 如果修改的是hypervisor的映射则清理TLB */
 
 		phys += paging->page_size;
 		virt += paging->page_size;
@@ -371,7 +372,7 @@ int paging_destroy(const struct paging_structures *pg_structs,
 		   unsigned long virt, unsigned long size,
 		   unsigned long paging_flags)
 {
-	size = PAGE_ALIGN(size);
+	size = PAGE_ALIGN(size);			/* 令大小4K对齐 */
 
 	while (size > 0) {
 		const struct paging *paging = pg_structs->root_paging;
@@ -382,13 +383,13 @@ int paging_destroy(const struct paging_structures *pg_structs,
 		int err;
 
 		/* walk down the page table, saving intermediate tables */
-		pt[0] = pg_structs->root_table;
+		pt[0] = pg_structs->root_table;						/* 根页表 */
 		while (1) {
-			pte = paging->get_entry(pt[n], virt);
-			if (!paging->entry_valid(pte, PAGE_PRESENT_FLAGS))
+			pte = paging->get_entry(pt[n], virt);			/* 找到虚拟地址对应的当前level的页表entry */
+			if (!paging->entry_valid(pte, PAGE_PRESENT_FLAGS))		/*如果entry无效，则结束 */
 				break;
-			if (paging->get_phys(pte, virt) != INVALID_PHYS_ADDR) {
-				unsigned long page_start;
+			if (paging->get_phys(pte, virt) != INVALID_PHYS_ADDR) {		/* 找到该entry和虚拟地址对应的物理地址，只有leaf pte才会返回有效地址 */
+				unsigned long page_start;								/* 得到的地址如果是有效的，则说明找到了leaf pte（可能是大页映射） */
 
 				/*
 				 * If the region to be unmapped doesn't fully
@@ -399,39 +400,39 @@ int paging_destroy(const struct paging_structures *pg_structs,
 					paging->page_size : PAGE_SIZE;
 				page_start = virt & ~(page_size-1);
 
-				if (virt <= page_start &&
+				if (virt <= page_start &&					/* 如果是页对齐并且需要销毁的映射的大小超过了一个当前level的页则结束 */
 				    virt + size >= page_start + page_size)
 					break;
 
-				err = split_hugepage(pg_structs->hv_paging,
+				err = split_hugepage(pg_structs->hv_paging,		/* 将huge page分裂成小的page */
 						     paging, pte, virt,
 						     paging_flags);
 				if (err)
 					return err;
 			}
-			pt[++n] = paging_phys2hvirt(paging->get_next_pt(pte));
+			pt[++n] = paging_phys2hvirt(paging->get_next_pt(pte));		/* 找到下一级的页表 */
 			paging++;
 		}
 		/* advance by page size of current level paging */
-		page_size = paging->page_size ? paging->page_size : PAGE_SIZE;
+		page_size = paging->page_size ? paging->page_size : PAGE_SIZE;		/* 获取当前level映射block的大小，若果不允许block映射则为page size */
 
 		/* walk up again, clearing entries, releasing empty tables */
 		while (1) {
-			paging->clear_entry(pte);
-			flush_pt_entry(pte, paging_flags);
-			if (n == 0 || !paging->page_table_empty(pt[n]))
+			paging->clear_entry(pte);								/* 删除entry */
+			flush_pt_entry(pte, paging_flags);						/* 清理cache */
+			if (n == 0 || !paging->page_table_empty(pt[n]))			/* 如果清理了最高level的page table或当前level的page table不为空则结束 */
 				break;
-			page_free(&mem_pool, pt[n], 1);
+			page_free(&mem_pool, pt[n], 1);							/* 释放该level的page table */
 			paging--;
-			pte = paging->get_entry(pt[--n], virt);
+			pte = paging->get_entry(pt[--n], virt);					/* 获取更高一级的entry */
 		}
 		if (pg_structs->hv_paging)
-			arch_paging_flush_page_tlbs(virt);
+			arch_paging_flush_page_tlbs(virt);						/* 清理tlb */
 
-		if (page_size > size)
+		if (page_size > size)										/* 如果销毁的页表映射的大小已经超过了需要销毁的映射的大小，则结束 */
 			break;
-		virt += page_size;
-		size -= page_size;
+		virt += page_size;											/* 需要销毁下一段地址 */
+		size -= page_size;											/* 更新销毁的映射大小，去掉已经销毁的映射大小 */
 	}
 	return 0;
 }
@@ -548,6 +549,147 @@ int paging_create_hvpt_link(const struct paging_structures *pg_dest_structs,
 	return 0;
 }
 
+
+#ifdef CONFIG_TEXT_SECTION_PROTECTION
+static int pte_set_flag(pt_entry_t pte, unsigned long mask, unsigned long value)
+{
+	*pte = ((*pte) & (~mask)) | value;
+	return 0;
+}
+
+// /**
+//  * Create a top-level link to the common hypervisor page table.
+//  * @param pg_dest_structs	Descriptor of the target paging structures.
+//  * @param virt			Virtual start address of the linked region.
+//  * @param size			Size of the memory region.
+//  * @param mask			Bit mask of bits to be set.
+//  * @param value			Value of bits to be set. 
+//  *
+//  * @return 0 on success, negative error code otherwise.
+//  */
+// int paging_set_flag(const struct paging_structures *pg_structs, 
+// 					unsigned long virt, unsigned long size, 
+// 					unsigned long mask, unsigned long value)
+// {
+// 	virt &= PAGE_MASK;					/* 令虚拟地址4K对齐 */
+// 	size = PAGE_ALIGN(size);			/* 将映射的大小按4K向上取整 */
+
+// 	while (size > 0) {
+// 		const struct paging *paging = pg_structs->root_paging;
+// 		page_table_t pt = pg_structs->root_table;
+// 		pt_entry_t pte;
+// 		int err;
+
+// 		while (1) {
+// 			pte = paging->get_entry(pt, virt);			/* 找到虚拟地址virt对应的当前level的entry */
+// 			if (paging->page_size > 0 &&				/* 当前level允许block mapping */
+// 			    paging->page_size <= size &&			/* 且当前level一个block的大小小于等于需要mapping的大小 */
+// 			    (virt & (paging->page_size - 1)) == 0 &&	/* 且虚拟地址都是以block大小对其的 */
+// 			    (paging->get_phys(pte, virt) != INVALID_PHYS_ADDR)) {
+// 				pte_set_flag(pte, mask, value);
+// 				flush_pt_entry(pte, PAGING_COHERENT);			/* 清理cache */
+// 				break;										/* 退出，并更新下一段需要映射的空间 */
+// 			}
+// 			if (paging->entry_valid(pte, PAGE_PRESENT_FLAGS)) {		/* 如果当前level的页表项映射大小大于需要mapping的大小或不是地址对齐的（意味着这是大页映射），这表明我们需要为该level对应的block的子block做映射 */
+// 				err = split_hugepage(pg_structs->hv_paging,			/* 将当前映射切分为更细粒度的映射 */
+// 						     paging, pte, virt,
+// 						     PAGING_COHERENT | PAGING_HUGE);		/* 可以不用COHERENT吗？因为前一段必定导致flush_pt */
+// 				if (err)
+// 					return err;
+// 				pt = paging_phys2hvirt(								/* 获取下一级页表 */
+// 						paging->get_next_pt(pte));
+// 			} else {
+// 				printk("WARNING: Invalid entry when enable GPHYS2PHYS PXN");
+// 				if(paging->page_size <= 0){
+// 					return EINVAL;					/* 如果当前的entry无效，则返回无效 */
+// 				}
+// 			}
+// 			paging++;
+// 		}
+// 		if (pg_structs->hv_paging)					
+// 			arch_paging_flush_page_tlbs(virt);		/* 如果修改的是hypervisor的映射则清理TLB */
+
+// 		virt += paging->page_size;
+// 		size -= paging->page_size;
+// 	}
+// 	return 0;
+// }
+
+/**
+ * Create a top-level link to the common hypervisor page table.
+ * @param pg_dest_structs	Descriptor of the target paging structures.
+ * @param virt			Virtual start address of the linked region.
+ * @param size			Size of the memory region.
+ * @param paging_flags	Paging flags.
+ * @param mask			Bit mask of bits to be set.
+ * @param value			Value of bits to be set. 
+ *
+ * @return 0 on success, negative error code otherwise.
+ */
+int paging_set_flag(const struct paging_structures *pg_structs,
+		   unsigned long virt, unsigned long size,
+		   unsigned long paging_flags, unsigned long mask, unsigned long value)
+{
+	size = PAGE_ALIGN(size);			/* 令大小4K对齐 */
+
+	while (size > 0) {
+		const struct paging *paging = pg_structs->root_paging;
+		page_table_t pt;
+		unsigned long page_size;
+		pt_entry_t pte;
+		int err;
+
+		/* walk down the page table, saving intermediate tables */
+		pt = pg_structs->root_table;						/* 根页表 */
+		while (1) {
+			pte = paging->get_entry(pt, virt);			/* 找到虚拟地址对应的当前level的页表entry */
+			if (!paging->entry_valid(pte, PAGE_PRESENT_FLAGS))		/*如果entry无效，则结束 */
+				break;
+			if (paging->get_phys(pte, virt) != INVALID_PHYS_ADDR) {		/* 找到该entry和虚拟地址对应的物理地址，只有leaf pte才会返回有效地址 */
+				unsigned long page_start;								/* 得到的地址如果是有效的，则说明找到了leaf pte（可能是大页映射） */
+
+				/*
+				 * If the region to be unmapped doesn't fully
+				 * cover the hugepage, the hugepage will need to
+				 * be split.
+				 */
+				page_size = paging->page_size ?
+					paging->page_size : PAGE_SIZE;
+				page_start = virt & ~(page_size-1);
+
+				if (virt <= page_start &&					/* 如果是页对齐并且需要销毁的映射的大小超过了一个当前level的页则结束 */
+				    virt + size >= page_start + page_size)
+					break;
+
+				err = split_hugepage(pg_structs->hv_paging,		/* 将huge page分裂成小的page */
+						     paging, pte, virt,
+						     paging_flags);
+				if (err)
+					return err;
+			}
+			pt = paging_phys2hvirt(paging->get_next_pt(pte));		/* 找到下一级的页表 */
+			paging++;
+		}
+		/* advance by page size of current level paging */
+		page_size = paging->page_size ? paging->page_size : PAGE_SIZE;		/* 获取当前level映射block的大小，若果不允许block映射则为page size */
+
+		/* find the pte, change the flag and flush the cache */
+		pte_set_flag(pte, mask, value);							/* 修改entry的flag */							
+		flush_pt_entry(pte, paging_flags);						/* 清理cache */
+
+		if (pg_structs->hv_paging)
+			arch_paging_flush_page_tlbs(virt);						/* 清理tlb */
+
+		if (page_size > size)										/* 如果销毁的页表映射的大小已经超过了需要销毁的映射的大小，则结束 */
+			break;
+		virt += page_size;											/* 需要销毁下一段地址 */
+		size -= page_size;											/* 更新销毁的映射大小，去掉已经销毁的映射大小 */
+	}
+	return 0;
+}
+
+#endif
+
 /**
  * Map guest (cell) pages into the hypervisor address space.
  * @param pg_structs	Descriptor of the guest paging structures if @c gaddr
@@ -606,7 +748,7 @@ int paging_map_all_per_cpu(unsigned int cpu, bool enable)
 	 * Note that the physical address does not matter for !enable because
 	 * we mark all pages non-present in that case.
 	 */
-	return paging_create(&hv_paging_structs, paging_hvirt2phys(cpu_data),
+	return paging_create(&hv_paging_structs, paging_hvirt2phys(cpu_data),		/* 将所有PER CPU区域映射到hypervisor的页表中 */
 			sizeof(struct per_cpu) - sizeof(struct public_per_cpu),
 			(unsigned long)cpu_data,
 			enable ? PAGE_DEFAULT_FLAGS : PAGE_NONPRESENT_FLAGS,

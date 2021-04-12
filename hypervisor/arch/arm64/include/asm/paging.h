@@ -140,6 +140,13 @@
 #define S2_PTE_FLAG_NORMAL	PTE_MEMATTR(S2_MEMATTR_OWBIWB)
 #define S2_PTE_FLAG_DEVICE	PTE_MEMATTR(S2_MEMATTR_DEV)
 
+#ifdef CONFIG_TEXT_SECTION_PROTECTION
+#define S2_FLAG_PXN_MASK			(0x3UL << 53)
+#define S2_FLAG_PXN_VALUE			(0x1UL << 53)		
+#define GPHYS2PHYS_PXN_MASK			S2_FLAG_PXN_MASK			
+#define GPHYS2PHYS_PXN_VALUE		S2_FLAG_PXN_VALUE
+#endif
+
 #define S1_DEFAULT_FLAGS	(PTE_FLAG_VALID | PTE_ACCESS_FLAG	\
 				| S1_PTE_FLAG_NORMAL | PTE_INNER_SHAREABLE\
 				| S1_PTE_ACCESS_EL0)
@@ -225,6 +232,7 @@ static inline void arch_paging_flush_cpu_caches(void *addr, long size)
 {
 	arm_dcaches_flush(addr, size, DCACHE_CLEAN);
 }
+
 
 #endif /* !__ASSEMBLY__ */
 

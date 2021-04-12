@@ -927,6 +927,49 @@ static int cpu_get_info(struct per_cpu *cpu_data, unsigned long cpu_id,
 		return -EINVAL;
 }
 
+#ifdef CONFIG_TEXT_SECTION_PROTECTION
+/**
+ * Mark guest physical address as Privilege eXeucte Never(PXN).
+ * @param cpu_data	Data structure of the calling CPU.
+ * @param start		start address of guest physical memory.
+ * @param size		size of guest physical memory to be marked as PXN.
+ *
+ * @return 0 on success, negative error code otherwise.
+ */
+int gphys2phys_pxn(struct per_cpu *cpu_data, unsigned long start, unsigned long size)
+{
+	struct paging_structures *pg_structs = arch_get_pg_struct(&(cpu_data->public.cell->arch));
+	int err;
+	if(size == 0) return 0;
+	
+	err = paging_set_flag(pg_structs, start, size, PAGING_COHERENT | PAGING_HUGE, GPHYS2PHYS_PXN_MASK, GPHYS2PHYS_PXN_VALUE);
+	if(err) {
+		printk("Error in enable guest physical address to physical address PXN");
+	}
+	printk("Successfully enable guest physical address to physical address PXN");
+	return err;
+}
+#endif
+#ifdef CONFIG_PAGE_TABLE_PROTECTION
+/**
+ * Mark guest physical address as Privilege eXeucte Never(PXN).
+ * @param cpu_data	Data structure of the calling CPU.
+ * @param addr		address of page table entry to be written
+ * @param value		address of page table entry to be written
+ *
+ * @return 0 on success, negative error code otherwise.
+ */
+int pgt_write(struct per_cpu *cpu_data, unsigned long addr, unsigned long value)
+{
+	if((addr & PTE_ADDR_MASK) != 0){
+		printk("The addr of pte entry is not aligned");
+		return -EINVAL;
+	}
+	*(unsigned long *) addr = value;
+	return 0;
+}
+#endif
+
 /**
  * Handle hypercall invoked by a cell.
  * @param code		Hypercall code.
@@ -966,6 +1009,14 @@ long hypercall(unsigned long code, unsigned long arg1, unsigned long arg2)
 			return trace_error(-EPERM);
 		printk("%c", (char)arg1);
 		return 0;
+#ifdef CONFIG_TEXT_SECTION_PROTECTION
+	case JAILHOUSE_HC_GPHYS2PHYS_PXN:
+		return gphys2phys_pxn(cpu_data, arg1, arg2);
+#endif
+#ifdef CONFIG_PAGE_TABLE_PROTECTION
+	case JAILHOUSE_HC_PGT_WRITE:
+		return pgt_write(cpu_data, arg1, arg2);
+#endif
 	default:
 		return -ENOSYS;
 	}

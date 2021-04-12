@@ -132,6 +132,30 @@ void shutdown(void);
 void __attribute__((noreturn)) panic_stop(void);
 void panic_park(void);
 
+#ifdef CONFIG_TEXT_SECTION_PROTECTION
+/**
+ * Mark guest physical address as Privilege eXeucte Never(PXN).
+ * @param cpu_data	Data structure of the calling CPU.
+ * @param start		start address of guest physical memory.
+ * @param size		size of guest physical memory to be marked as PXN.
+ *
+ * @return 0 on success, negative error code otherwise.
+ */
+int gphys2phys_pxn(struct per_cpu *cpu_data, unsigned long start, unsigned long size);
+struct paging_structures *arch_get_pg_struct(struct arch_cell *arch);
+#endif
+#ifdef CONFIG_PAGE_TABLE_PROTECTION
+/**
+ * Mark guest physical address as Privilege eXeucte Never(PXN).
+ * @param cpu_data	Data structure of the calling CPU.
+ * @param addr		address of page table entry to be written
+ * @param value		address of page table entry to be written
+ *
+ * @return 0 on success, negative error code otherwise.
+ */
+int pgt_write(struct per_cpu *cpu_data, unsigned long addr, unsigned long value);
+#endif
+
 /**
  * Resume a suspended remote CPU.
  * @param cpu_id	ID of the target CPU.
