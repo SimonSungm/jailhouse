@@ -181,7 +181,7 @@ struct {
 		{
 			.phys_start = 0x627b9000,
 			.virt_start = 0x627b9000,
-			.size = 0x3204000,
+			.size = 0x3205000,
 			.flags = JAILHOUSE_MEM_READ | JAILHOUSE_MEM_WRITE |
 				JAILHOUSE_MEM_EXECUTE | JAILHOUSE_MEM_DMA,
 		},
