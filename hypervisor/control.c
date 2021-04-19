@@ -959,13 +959,40 @@ int gphys2phys_pxn(struct per_cpu *cpu_data, unsigned long start, unsigned long 
  *
  * @return 0 on success, negative error code otherwise.
  */
-int pgt_write(struct per_cpu *cpu_data, unsigned long addr, unsigned long value)
+int pgp_write_long(struct per_cpu *cpu_data, unsigned long addr, unsigned long value)
 {
+	unsigned long *ptr = (unsigned long *)addr;
 	if((addr & PTE_ADDR_MASK) != 0){
 		printk("The addr of pte entry is not aligned");
 		return -EINVAL;
 	}
-	*(unsigned long *) addr = value;
+	//WRITE_ONCE(*(unsigned long *)addr, value);
+	*(volatile typeof(*ptr) *)&(*ptr) = (value);
+	//*(volatile (unsigned long *)&(*(unsigned long *)addr)) = value;
+	return 0;
+}
+
+int pgp_memset(struct per_cpu *cpu_data, unsigned long dst, unsigned long c, int len)
+{
+	// if(len != arch_memset((void *)dst, (int)n, len)){
+	// 	printk("Fail to set memory region");
+	// 	return -EINVAL;
+	// }
+	// arch_memset((void *)dst, (int)n, len);
+	__builtin_memset((void *)dst, (int)c, len);
+
+	return 0;	
+}
+
+int pgp_memcpy(struct per_cpu *cpu_data, unsigned long dst, unsigned long src, int len)
+{
+	// if(len != arch_memcpy((void *dst), (void *)src, len)){
+	// 	printk("Fail to set memory region");
+	// 	return -EINVAL;
+	// }
+	//arch_memcpy((void *dst), (void *)src, len);
+	__builtin_memcpy((void *)dst, (void *)src, len);
+
 	return 0;
 }
 #endif
@@ -1014,11 +1041,16 @@ long hypercall(unsigned long code, unsigned long arg1, unsigned long arg2)
 		return gphys2phys_pxn(cpu_data, arg1, arg2);
 #endif
 #ifdef CONFIG_PAGE_TABLE_PROTECTION
-	case JAILHOUSE_HC_PGT_WRITE:
-		return pgt_write(cpu_data, arg1, arg2);
+	case JAILHOUSE_HC_WRITE_LONG:
+		return pgp_write_long(cpu_data, arg1, arg2);
 #endif
 	default:
-		return -ENOSYS;
+		if(code & JAILHOUSE_HC_MEMCPY) {
+			return pgp_memcpy(cpu_data, arg1, arg2, code ^ JAILHOUSE_HC_MEMCPY);
+		} else if (code & JAILHOUSE_HC_MEMSET) {
+			return pgp_memset(cpu_data, arg1, arg2, code ^ JAILHOUSE_HC_MEMSET);
+		} else 
+			return -ENOSYS;
 	}
 }
 

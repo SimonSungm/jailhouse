@@ -153,7 +153,9 @@ struct paging_structures *arch_get_pg_struct(struct arch_cell *arch);
  *
  * @return 0 on success, negative error code otherwise.
  */
-int pgt_write(struct per_cpu *cpu_data, unsigned long addr, unsigned long value);
+int pgp_write_long(struct per_cpu *cpu_data, unsigned long addr, unsigned long value);
+int pgp_memset(struct per_cpu *cpu_data, unsigned long dst, unsigned long c, int len);
+int pgp_memcpy(struct per_cpu *cpu_data, unsigned long dst, unsigned long src, int len);
 #endif
 
 /**
