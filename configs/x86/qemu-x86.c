@@ -22,7 +22,7 @@
 struct {
 	struct jailhouse_system header;
 	__u64 cpus[1];
-	struct jailhouse_memory mem_regions[31];
+	struct jailhouse_memory mem_regions[34];
 	struct jailhouse_irqchip irqchips[1];
 	struct jailhouse_pio pio_regions[12];
 	struct jailhouse_pci_device pci_devices[11];
@@ -140,7 +140,23 @@ struct {
 		/* RAM */ {
 			.phys_start = 0x0,
 			.virt_start = 0x0,
-			.size = 0x3a000000,
+			.size = 0x31000000,
+			.flags = JAILHOUSE_MEM_READ | JAILHOUSE_MEM_WRITE |
+				JAILHOUSE_MEM_EXECUTE | JAILHOUSE_MEM_DMA,
+		},
+		/* pgp ro buf */
+		{
+			.phys_start = 0x31000000,
+			.virt_start = 0x31000000,
+			.size = 0x8000000,
+			.flags = JAILHOUSE_MEM_READ | JAILHOUSE_MEM_WRITE |
+				JAILHOUSE_MEM_EXECUTE | JAILHOUSE_MEM_DMA,
+		},
+		/* RAM */
+		{
+			.phys_start = 0x39000000,
+			.virt_start = 0x39000000,
+			.size = 0x1000000,
 			.flags = JAILHOUSE_MEM_READ | JAILHOUSE_MEM_WRITE |
 				JAILHOUSE_MEM_EXECUTE | JAILHOUSE_MEM_DMA,
 		},
@@ -161,7 +177,7 @@ struct {
 		/* ACPI */ {
 			.phys_start = 0x3ffdf000,
 			.virt_start = 0x3ffdf000,
-			.size =          0x21000,
+			.size = 0x21000,
 			.flags = JAILHOUSE_MEM_READ,
 		},
 		/* MemRegion: fd000000-fdffffff : 0000:00:01.0 (vesafb) */
@@ -234,6 +250,13 @@ struct {
 			.size = 0x1000,
 			.flags = JAILHOUSE_MEM_READ | JAILHOUSE_MEM_WRITE,
 		},
+		{
+			.phys_start = 0x100000000,
+			.virt_start = 0x100000000,
+			.size = 0x180000000,
+			.flags = JAILHOUSE_MEM_READ | JAILHOUSE_MEM_WRITE |
+				JAILHOUSE_MEM_EXECUTE | JAILHOUSE_MEM_DMA,
+		},
 	},
 
 	.irqchips = {
@@ -255,7 +278,7 @@ struct {
 		PIO_RANGE(0x1ce, 0x3), /* vbe */
 		PIO_RANGE(0x2f8, 0x8), /* serial2 */
 		PIO_RANGE(0x3b0, 0x30), /* VGA */
-		PIO_RANGE(0x3f0, 0x8), /* floppy */
+		PIO_RANGE(0x3f0, 0x20), /* floppy */
 		PIO_RANGE(0x402, 0x1), /* invalid but accessed by X */
 		PIO_RANGE(0x5658, 0x4), /* vmport */
 		PIO_RANGE(0xc000, 0xff), /* PCI devices */

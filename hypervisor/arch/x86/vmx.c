@@ -237,6 +237,12 @@ static int vmx_check_features(void)
 	    !(vmx_proc_ctrl2 & SECONDARY_EXEC_UNRESTRICTED_GUEST))
 		return trace_error(-EIO);
 
+#ifdef CONFIG_TEXT_SECTION_PROTECTION
+       if(!(vmx_proc_ctrl2 & SECONDARY_EXEC_MODE_BASED_EXEC_CTRL)){
+               return trace_error(-EIO);
+       }
+#endif
+
 	/* require RDTSCP, INVPCID, XSAVES if present in CPUID */
 	if (cpuid_edx(0x80000001, 0) & X86_FEATURE_RDTSCP)
 		secondary_exec_addon |= SECONDARY_EXEC_RDTSCP;
@@ -287,6 +293,13 @@ static int vmx_check_features(void)
 
 	return 0;
 }
+
+#if defined(CONFIG_TEXT_SECTION_PROTECTION) || defined(CONFIG_PAGE_TABLE_PROTECTION)
+struct paging_structures *arch_get_pg_struct(struct arch_cell *arch)
+{
+       return &arch->vmx.ept_structs;
+}
+#endif
 
 static void ept_set_next_pt(pt_entry_t pte, unsigned long next_pt)
 {
@@ -573,8 +586,14 @@ static bool vmcs_setup(void)
 	val |= SECONDARY_EXEC_VIRTUALIZE_APIC_ACCESSES |
 		SECONDARY_EXEC_ENABLE_EPT | SECONDARY_EXEC_UNRESTRICTED_GUEST |
 		secondary_exec_addon;
-	ok &= vmcs_write32(SECONDARY_VM_EXEC_CONTROL, val);
 
+#ifdef CONFIG_TEXT_SECTION_PROTECTION
+    val |= SECONDARY_EXEC_MODE_BASED_EXEC_CTRL;
+	ok &= vmcs_write32(SECONDARY_VM_EXEC_CONTROL, val);
+    if(!ok) trace_error(-EIO);
+#else
+    ok &= vmcs_write32(SECONDARY_VM_EXEC_CONTROL, val);
+#endif
 	ok &= vmcs_write64(APIC_ACCESS_ADDR,
 			   paging_hvirt2phys(apic_access_page));
 
@@ -1136,11 +1155,15 @@ void vcpu_vendor_get_io_intercept(struct vcpu_io_intercept *io)
 void vcpu_vendor_get_mmio_intercept(struct vcpu_mmio_intercept *mmio)
 {
 	u64 exitq = vmcs_read64(EXIT_QUALIFICATION);
+	//printk("EXIT_QUALIFICATION: 0x%016llx\n", exitq);
 
 	mmio->phys_addr = vmcs_read64(GUEST_PHYSICAL_ADDRESS);
 	/* We don't enable dirty/accessed bit updated in EPTP,
 	 * so only read of write flags can be set, not both. */
 	mmio->is_write = !!(exitq & 0x2);
+#ifdef XCONFIG_PAGE_TABLE_PROTECTION
+	mmio->qualification = exitq;
+#endif
 }
 
 void vcpu_handle_exit(struct per_cpu *cpu_data)

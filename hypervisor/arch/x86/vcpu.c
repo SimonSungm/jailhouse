@@ -47,9 +47,15 @@ int vcpu_early_init(void)
 		return err;
 
 	/* Map guest parking code (shared between cells and CPUs) */
+// #ifdef CONFIG_TEXT_SECTION_PROTECTION
+//     return paging_create(&parking_pt, paging_hvirt2phys(parking_code),
+//                          PAGE_SIZE, 0, PAGE_READONLY_FLAGS | PAGE_FLAG_US | EPT_FLAG_USER_EXECUTE, // is it necessary?
+//                          PAGING_NON_COHERENT | PAGING_NO_HUGE);
+// #else	
 	return paging_create(&parking_pt, paging_hvirt2phys(parking_code),
 			     PAGE_SIZE, 0, PAGE_READONLY_FLAGS | PAGE_FLAG_US,
 			     PAGING_NON_COHERENT | PAGING_NO_HUGE);
+// #endif
 }
 
 /* Can be overridden in vendor-specific code if needed */
@@ -260,7 +266,26 @@ bool vcpu_handle_mmio_access(void)
 	unsigned long *reg;
 
 	vcpu_vendor_get_mmio_intercept(&intercept);
-
+#ifdef XCONFIG_PAGE_TABLE_PROTECTION
+	if((intercept.qualification & EPT_VIOLATION_FLAG_MASK) == EPT_VIOLATION_FLAG_VALUE){
+		reg = (unsigned long *)(intercept.phys_addr + PGP_PHY2VIRT_OFFSET);
+		if(!((*reg) & PT_ACCESSED_FLAG_MASK)) {
+			printk("CATCH EPT VIOLATION ACCESSED FLAG UPDATE\n");
+			*(volatile typeof(*reg) *)&(*reg) = (*reg) | PT_ACCESSED_FLAG_VALUE;
+		} else if (!((*reg) & PT_DIRTY_FLAG_MASK)){
+			printk("CATCH EPT VIOLATION DIRTY FLAG UPDATE\n");
+			*(volatile typeof(*reg) *)&(*reg) = (*reg) | PT_DIRTY_FLAG_VALUE;
+		} else {
+			//arch_paging_flush_cpu_caches(reg, sizeof(*reg));
+			paging_set_flag(arch_get_pg_struct(&(this_cpu_data()->public.cell->arch)), intercept.phys_addr, PAGE_SIZE,
+            	PAGING_COHERENT | PAGING_HUGE, GPHYS2PHYS_WRITE_MASK, GPHYS2PHYS_WRITE_MASK);
+			vcpu_tlb_flush();
+			printk("No flag to be updated: quali: 0x%016llx, value: 0x%016lx\n", intercept.qualification, *reg);
+			//goto invalid_access;
+		}
+		return true;
+	}
+#endif
 	vcpu_get_guest_paging_structs(&pg_structs);
 
 	inst = x86_mmio_parse(&pg_structs, intercept.is_write);
@@ -286,6 +311,14 @@ bool vcpu_handle_mmio_access(void)
 
 invalid_access:
 	/* report only unhandled access failures */
+	//printk("EXIT_QUALIFICATION: 0x%016llx\n", exitq);
+	reg = (unsigned long *)intercept.phys_addr;
+	for(int i = 0; i < 1; ++ i) {
+		printk("addr: 0x%016lx\n", (unsigned long)reg);
+		reg = (unsigned long *)((unsigned long)reg + PGP_PHY2VIRT_OFFSET);
+		printk("addr value: 0x%016lx\n", *reg);
+		reg = (unsigned long *)((*reg) & PAGE_MASK);
+	}	
 	if (result == MMIO_UNHANDLED)
 		panic_printk("FATAL: Invalid MMIO/RAM %s, "
 			     "addr: 0x%016llx size: %d\n",

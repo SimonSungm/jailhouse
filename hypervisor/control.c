@@ -927,6 +927,91 @@ static int cpu_get_info(struct per_cpu *cpu_data, unsigned long cpu_id,
 		return -EINVAL;
 }
 
+#ifdef CONFIG_TEXT_SECTION_PROTECTION
+/**
+ * Mark guest physical address as Privilege eXeucte Never(PXN).
+ * @param cpu_data     Data structure of the calling CPU.
+ * @param start                start address of guest physical memory.
+ * @param size         size of guest physical memory to be marked as PXN.
+ *
+ * @return 0 on success, negative error code otherwise.
+ */
+int gphys2phys_pxn(struct per_cpu *cpu_data, unsigned long start, unsigned long size)
+{
+    struct paging_structures *pg_structs = arch_get_pg_struct(&(cpu_data->public.cell->arch));
+    int err;
+    if(size == 0) return 0;
+
+	err = paging_set_flag(pg_structs, start, size, PAGING_COHERENT | PAGING_HUGE, GPHYS2PHYS_PXN_MASK, GPHYS2PHYS_PXN_VALUE);
+	if(err) {
+    	printk("Error in enable guest physical address to physical address PXN\n");
+    }
+    arch_flush_cell_vcpu_caches(&root_cell);
+    printk("Successfully enable guest physical address to physical address PXN\n");
+    return err;
+}
+#endif
+#ifdef CONFIG_PAGE_TABLE_PROTECTION
+// int gphys2phys_wn(struct per_cpu *cpu_data)
+// {
+// 	struct paging_structures *pg_structs = arch_get_pg_struct(&(cpu_data->public.cell->arch));
+//     int err;
+
+// 	err = paging_set_flag(pg_structs, PGP_RO_BUF_BASE, PGP_ROBUF_SIZE,
+// 		PAGING_NON_COHERENT | PAGING_HUGE, GPHYS2PHYS_WRITE_MASK, GPHYS2PHYS_WRITE_PROTECTION_VALUE);
+// 	if(err) {
+//     	printk("Error in disable pgp buffer write permission\n");
+//     }
+//     arch_flush_cell_vcpu_caches(&root_cell);
+//     printk("Successfully disable pgp buffer write permission\n");
+//     return err;
+// }
+
+/**
+ * Mark guest physical address as Privilege eXeucte Never(PXN).
+ * @param cpu_data     Data structure of the calling CPU.
+ * @param addr         address of page table entry to be written
+ * @param value                address of page table entry to be written
+ *
+ * @return 0 on success, negative error code otherwise.
+ */
+int pgp_write_long(struct per_cpu *cpu_data, unsigned long addr, unsigned long value)
+{
+    unsigned long *ptr = (unsigned long *)addr;
+    if((addr & PTE_ADDR_MASK) != 0){
+        printk("The addr of pte entry is not aligned");
+        return -EINVAL;
+    }
+	//printk("pgp_write_long start\n");
+    *(volatile typeof(*ptr) *)&(*ptr) = (value);
+	//printk("pgp_write_long end\n");
+    return 0;
+}
+
+int pgp_memset(struct per_cpu *cpu_data, unsigned long dst, unsigned long c, int len)
+{
+	//printk("pgp_memset start dst: 0x%016lx, c: %lx, len %d\n",dst, c, len);
+    __builtin_memset((void *)dst, (int)c, len);
+	//printk("pgp_memset end\n");
+    return 0;
+}
+
+int pgp_memcpy(struct per_cpu *cpu_data, unsigned long dst, unsigned long src, int len)
+{
+    // TODO: src may not in pgp ro buf, so that may not be mapped
+	void *ret = NULL;
+	//printk("pgp_memcpy start dst: 0x%016lx, src: 0x%016lx, len %d\n",dst, src, len);
+	
+	while(ret == NULL){
+		ret = paging_get_guest_pages(NULL, src, 1, PAGE_DEFAULT_FLAGS);
+	}
+	ret += (src & PAGE_OFFS_MASK);
+	__builtin_memcpy((void *)dst, (void *)ret, len);
+	//printk("pgp_memcpy end\n");
+    return 0;
+}
+#endif
+
 /**
  * Handle hypercall invoked by a cell.
  * @param code		Hypercall code.
@@ -966,8 +1051,25 @@ long hypercall(unsigned long code, unsigned long arg1, unsigned long arg2)
 			return trace_error(-EPERM);
 		printk("%c", (char)arg1);
 		return 0;
-	default:
-		return -ENOSYS;
+#ifdef CONFIG_TEXT_SECTION_PROTECTION
+    case JAILHOUSE_HC_GPHYS2PHYS_PXN:
+    	return gphys2phys_pxn(cpu_data, arg1, arg2);
+#endif
+#ifdef CONFIG_PAGE_TABLE_PROTECTION
+    case JAILHOUSE_HC_WRITE_LONG:
+    	return pgp_write_long(cpu_data, arg1, arg2);
+	// case JAILHOUSE_HC_WRITE_DISABLE:
+	// 	return gphys2phys_wn(cpu_data);
+#endif
+    default:
+#ifdef CONFIG_PAGE_TABLE_PROTECTION
+    	if(code & JAILHOUSE_HC_MEMCPY) {
+        	return pgp_memcpy(cpu_data, arg1, arg2, code ^ JAILHOUSE_HC_MEMCPY);
+        } else if (code & JAILHOUSE_HC_MEMSET) {
+        	return pgp_memset(cpu_data, arg1, arg2, code ^ JAILHOUSE_HC_MEMSET);
+    	} else 
+#endif
+    		return -ENOSYS;
 	}
 }
 

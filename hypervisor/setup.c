@@ -21,6 +21,7 @@
 #include <jailhouse/unit.h>
 #include <generated/version.h>
 #include <asm/spinlock.h>
+#include <jailhouse/pgtable_dump.h>
 
 extern u8 __text_start[];
 
@@ -117,6 +118,13 @@ static void cpu_init(struct per_cpu *cpu_data)
 	err = paging_create_hvpt_link(&cpu_data->pg_structs, JAILHOUSE_BASE);
 	if (err)
 		goto failed;
+#ifdef CONFIG_PAGE_TABLE_PROTECTION
+	err = paging_create_hvpt_link(&cpu_data->pg_structs, PGP_RO_BUF_VIRT);
+	if (err) {
+		printk("error in mapping pgp ro buf hvpt link");
+		goto failed;
+	}
+#endif
 
 	if (CON_IS_MMIO(system_config->debug_console.flags)) {
 		err = paging_create_hvpt_link(&cpu_data->pg_structs,
@@ -191,6 +199,13 @@ static void init_late(void)
 			return;
 	}
 
+#ifdef CONFIG_PAGE_TABLE_PROTECTION
+    //paging_set_flag(arch_get_pg_struct(&(root_cell.arch)), PGP_RO_BUF_BASE, PGP_ROBUF_SIZE,
+    //         PAGING_NON_COHERENT | PAGING_HUGE, GPHYS2PHYS_WRITE_MASK, GPHYS2PHYS_WRITE_PROTECTION_VALUE);
+	//paging_set_flag(arch_get_pg_struct(&(root_cell.arch)), PGP_RO_BUF_BASE, PGP_ROBUF_SIZE,
+    //        PAGING_COHERENT | PAGING_HUGE, GPHYS2PHYS_WRITE_MASK, GPHYS2PHYS_WRITE_PROTECTION_VALUE);
+#endif
+
 	config_commit(&root_cell);
 
 	paging_dump_stats("after late setup");
@@ -261,8 +276,10 @@ int entry(unsigned int cpu_id, struct per_cpu *cpu_data)
 		return error;
 	}
 
-	if (master)
+	if (master){
 		printk("Activating hypervisor\n");
+		x86_ept_dump(arch_get_pg_struct(&(root_cell.arch))->root_table, 0, 0);
+	}
 
 	/* point of no return */
 	arch_cpu_activate_vmm();
