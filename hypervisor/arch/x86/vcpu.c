@@ -47,9 +47,15 @@ int vcpu_early_init(void)
 		return err;
 
 	/* Map guest parking code (shared between cells and CPUs) */
+// #ifdef CONFIG_TEXT_SECTION_PROTECTION
+//     return paging_create(&parking_pt, paging_hvirt2phys(parking_code),
+//                          PAGE_SIZE, 0, PAGE_READONLY_FLAGS | PAGE_FLAG_US | EPT_FLAG_USER_EXECUTE, // is it necessary?
+//                          PAGING_NON_COHERENT | PAGING_NO_HUGE);
+// #else	
 	return paging_create(&parking_pt, paging_hvirt2phys(parking_code),
 			     PAGE_SIZE, 0, PAGE_READONLY_FLAGS | PAGE_FLAG_US,
 			     PAGING_NON_COHERENT | PAGING_NO_HUGE);
+// #endif
 }
 
 /* Can be overridden in vendor-specific code if needed */
@@ -260,7 +266,6 @@ bool vcpu_handle_mmio_access(void)
 	unsigned long *reg;
 
 	vcpu_vendor_get_mmio_intercept(&intercept);
-
 	vcpu_get_guest_paging_structs(&pg_structs);
 
 	inst = x86_mmio_parse(&pg_structs, intercept.is_write);

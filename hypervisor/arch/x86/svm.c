@@ -447,6 +447,13 @@ void vcpu_exit(struct per_cpu *cpu_data)
 	write_msr(MSR_VM_HSAVE_PA, 0);
 }
 
+#if defined(CONFIG_TEXT_SECTION_PROTECTION) || defined(CONFIG_PAGE_TABLE_PROTECTION)
+struct paging_structures *arch_get_pg_struct(struct arch_cell *arch)
+{
+    return &arch->svm.npt_iommu_structs;
+}
+#endif
+
 void __attribute__((noreturn)) vcpu_activate_vmm(void)
 {
 	struct per_cpu *cpu_data = this_cpu_data();

@@ -298,10 +298,32 @@ enum vmx_state { VMXOFF = 0, VMXON, VMCS_READY };
 
 #define EPT_PAGE_DIR_LEVELS			4
 
+#ifdef CONFIG_PAGE_TABLE_PROTECTION
+#define GPHYS2PHYS_WRITE       EPT_FLAG_WRITE
+#define GPHYS2PHYS_WRITE_MASK  0x002UL
+#define GPHYS2PHYS_WRITE_PROTECTION_VALUE (0x0UL << 1)
+#endif
+
+#ifdef CONFIG_TEXT_SECTION_PROTECTION
+#define SECONDARY_EXEC_MODE_BASED_EXEC_CTRL (1UL << 22)
+
+#define EPT_FLAG_READ                          0x001
+#define EPT_FLAG_WRITE                         0x002
+#define EPT_FLAG_WB_TYPE                       0x030
+
+#define EPT_FLAG_EXECUTE_KERNEL   		(0x1UL << 2)
+#define EPT_FLAG_EXECUTE_USER         	(0x1UL << 10)
+#define EPT_FLAG_EXECUTE               	(EPT_FLAG_EXECUTE_USER | EPT_FLAG_EXECUTE_KERNEL)
+#define EPT_FLAG_PXN_MASK               (0x1UL << 2)
+#define EPT_FLAG_PXN_VALUE              (0x0UL << 2)            
+#define GPHYS2PHYS_PXN_MASK            	EPT_FLAG_PXN_MASK                       
+#define GPHYS2PHYS_PXN_VALUE          	EPT_FLAG_PXN_VALUE
+#else
 #define EPT_FLAG_READ				0x001
 #define EPT_FLAG_WRITE				0x002
 #define EPT_FLAG_EXECUTE			0x004
 #define EPT_FLAG_WB_TYPE			0x030
+#endif
 
 #define EPT_TYPE_UNCACHEABLE			0
 #define EPT_TYPE_WRITEBACK			6

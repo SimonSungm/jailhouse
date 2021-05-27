@@ -43,6 +43,7 @@ endif
 
 CORE_OBJECTS = setup.o printk.o paging.o control.o lib.o mmio.o pci.o ivshmem.o
 CORE_OBJECTS += uart.o uart-8250.o
+CORE_OBJECTS += pgtable_dump.o
 
 ifdef CONFIG_JAILHOUSE_GCOV
 CORE_OBJECTS += gcov.o

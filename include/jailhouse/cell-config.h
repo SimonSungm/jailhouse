@@ -121,6 +121,10 @@ struct jailhouse_cell_desc {
 #define JAILHOUSE_MEM_IO_16		(2 << JAILHOUSE_MEM_IO_WIDTH_SHIFT)
 #define JAILHOUSE_MEM_IO_32		(4 << JAILHOUSE_MEM_IO_WIDTH_SHIFT)
 #define JAILHOUSE_MEM_IO_64		(8 << JAILHOUSE_MEM_IO_WIDTH_SHIFT)
+#ifdef CONFIG_TEXT_SECTION_PROTECTION
+#define JAILHOUSE_MEM_EXECUTE_KERNEL	0x800000
+#endif
+
 
 struct jailhouse_memory {
 	__u64 phys_start;

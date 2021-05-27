@@ -927,6 +927,134 @@ static int cpu_get_info(struct per_cpu *cpu_data, unsigned long cpu_id,
 		return -EINVAL;
 }
 
+#ifdef CONFIG_TEXT_SECTION_PROTECTION
+/**
+ * Mark guest physical address as Privilege eXeucte Never(PXN).
+ * @param cpu_data		Data structure of the calling CPU.
+ * @param start			start address of guest physical memory.
+ * @param size			size of guest physical memory to be marked.
+ *
+ * @return 0 on success, negative error code otherwise.
+ */
+int gphys2phys_pxn(struct per_cpu *cpu_data, unsigned long start, unsigned long size)
+{
+    struct paging_structures *pg_structs = arch_get_pg_struct(&(cpu_data->public.cell->arch));
+    int err;
+    if(size == 0) return 0;
+
+	err = paging_set_flag(pg_structs, start, size, 
+		PAGING_COHERENT | PAGING_HUGE, GPHYS2PHYS_PXN_MASK, GPHYS2PHYS_PXN_VALUE);
+	if(err) {
+    	printk("Error in enable guest physical address to physical address PXN\n");
+    }
+    arch_flush_cell_vcpu_caches(&root_cell);
+    printk("Successfully enable guest physical address to physical address PXN\n");
+    return err;
+}
+#endif
+#ifdef CONFIG_PAGE_TABLE_PROTECTION
+/**
+ * Mark guest physical address as not writable.
+ * @param cpu_data		Data structure of the calling CPU.
+ * @param start			start address of guest physical memory.
+ * @param size			size of guest physical memory to be marked.
+ *
+ * @return 0 on success, negative error code otherwise.
+ */
+int gphys2phys_wn(struct per_cpu *cpu_data, unsigned long start, unsigned long size)
+{
+	struct paging_structures *pg_structs = arch_get_pg_struct(&(cpu_data->public.cell->arch));
+    int err;
+
+	err = paging_set_flag(pg_structs, start, size,
+		PAGING_COHERENT | PAGING_HUGE, GPHYS2PHYS_WRITE_MASK, GPHYS2PHYS_WRITE_PROTECTION_VALUE);
+	if(err) {
+    	printk("Error in disable pgp buffer write permission\n");
+    }
+    arch_flush_cell_vcpu_caches(&root_cell);
+    printk("Successfully disable pgp buffer write permission\n");
+    return err;
+}
+
+/**
+ * Mark guest physical address as writable.
+ * @param cpu_data		Data structure of the calling CPU.
+ * @param start			start address of guest physical memory.
+ * @param size			size of guest physical memory to be marked.
+ *
+ * @return 0 on success, negative error code otherwise.
+ */
+int gphys2phys_we(struct per_cpu *cpu_data, unsigned long start, unsigned long size)
+{
+	struct paging_structures *pg_structs = arch_get_pg_struct(&(cpu_data->public.cell->arch));
+    int err;
+
+	err = paging_set_flag(pg_structs, start, size,
+		PAGING_COHERENT | PAGING_HUGE, GPHYS2PHYS_WRITE_MASK, GPHYS2PHYS_WRITE);
+	if(err) {
+    	printk("Error in enable pgp buffer write permission\n");
+    }
+    arch_flush_cell_vcpu_caches(&root_cell);
+    printk("Successfully enable pgp buffer write permission\n");
+    return err;
+}
+
+/**
+ * Wrtie a long value into the memory.
+ * @param cpu_data		Data structure of the calling CPU.
+ * @param addr			guest virtual address to be written.
+ * @param value			value to be written.
+ *
+ * @return 0 on success, negative error code otherwise.
+ */
+int pgp_write_long(struct per_cpu *cpu_data, unsigned long addr, unsigned long value)
+{
+    unsigned long *ptr = gva2hva(addr);
+    if((addr & PTE_ADDR_MASK) != 0){
+        printk("The addr of pte entry is not aligned");
+        return -EINVAL;
+    }
+    *(volatile typeof(*ptr) *)&(*ptr) = (value);
+    return 0;
+}
+
+/**
+ * set the memory region with the given value byte by byte.
+ * @param cpu_data		Data structure of the calling CPU.
+ * @param dst			start virtual address of guest memory.
+ * @param c				value of the byte.
+ * @param len			length of the memory region.
+ *
+ * @return 0 on success, negative error code otherwise.
+ */
+int pgp_memset(struct per_cpu *cpu_data, unsigned long dst, unsigned long c, int len)
+{
+    __builtin_memset(gva2hva(dst), (int)c, len);
+    return 0;
+}
+
+/**
+ * copy the memory from the source to the destination byte by byte.
+ * @param cpu_data		Data structure of the calling CPU.
+ * @param dst			start virtual address of guest memory.
+ * @param src			start physical address of guest memory.
+ * @param len			length of the memory region.
+ *
+ * @return 0 on success, negative error code otherwise.
+ */
+int pgp_memcpy(struct per_cpu *cpu_data, unsigned long dst, unsigned long src, int len)
+{
+	void *ret = NULL;
+	
+	while(ret == NULL){
+		ret = paging_get_guest_pages(NULL, src, 1, PAGE_DEFAULT_FLAGS);
+	}
+	ret += (src & PAGE_OFFS_MASK);
+	__builtin_memcpy(gva2hva(dst), ret, len);
+    return 0;
+}
+#endif
+
 /**
  * Handle hypercall invoked by a cell.
  * @param code		Hypercall code.
@@ -966,8 +1094,27 @@ long hypercall(unsigned long code, unsigned long arg1, unsigned long arg2)
 			return trace_error(-EPERM);
 		printk("%c", (char)arg1);
 		return 0;
-	default:
-		return -ENOSYS;
+#ifdef CONFIG_TEXT_SECTION_PROTECTION
+    case JAILHOUSE_HC_GPHYS2PHYS_PXN:
+    	return gphys2phys_pxn(cpu_data, arg1, arg2);
+#endif
+#ifdef CONFIG_PAGE_TABLE_PROTECTION
+    case JAILHOUSE_HC_WRITE_LONG:
+    	return pgp_write_long(cpu_data, arg1, arg2);
+	case JAILHOUSE_HC_WRITE_DISABLE:
+	 	return gphys2phys_wn(cpu_data, arg1, arg2);
+	case JAILHOUSE_HC_WRITE_ENABLE:
+		return gphys2phys_we(cpu_data, arg1, arg2);
+#endif
+    default:
+#ifdef CONFIG_PAGE_TABLE_PROTECTION
+    	if(code & JAILHOUSE_HC_MEMCPY) {
+        	return pgp_memcpy(cpu_data, arg1, arg2, code ^ JAILHOUSE_HC_MEMCPY);
+        } else if (code & JAILHOUSE_HC_MEMSET) {
+        	return pgp_memset(cpu_data, arg1, arg2, code ^ JAILHOUSE_HC_MEMSET);
+    	} else 
+#endif
+    		return -ENOSYS;
 	}
 }
 

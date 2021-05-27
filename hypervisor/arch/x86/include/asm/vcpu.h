@@ -36,6 +36,9 @@ struct vcpu_io_intercept {
 struct vcpu_mmio_intercept {
 	u64 phys_addr;
 	bool is_write;
+#ifdef XCONFIG_PAGE_TABLE_PROTECTION
+	u64 qualification;
+#endif
 };
 
 int vcpu_early_init(void);
