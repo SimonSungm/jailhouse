@@ -147,9 +147,9 @@ int gphys2phys_pxn(struct per_cpu *cpu_data, unsigned long start, unsigned long 
 struct paging_structures *arch_get_pg_struct(struct arch_cell *arch);
 #endif
 #ifdef CONFIG_PAGE_TABLE_PROTECTION
-#define PGP_RO_BUF_BASE 0x31000000
-#define PGP_ROBUF_SIZE 0x8000000
-#define PGP_RO_BUF_VIRT 0xffff888031000000UL
+#define PGP_RO_BUF_BASE 0x0000003fef600000UL
+#define PGP_ROBUF_SIZE 0x0000000010000000UL
+#define PGP_RO_BUF_VIRT 0xffff88bfef600000UL
 inline void *gva2hva(unsigned long addr) {
 	return (void *)addr;
 }
